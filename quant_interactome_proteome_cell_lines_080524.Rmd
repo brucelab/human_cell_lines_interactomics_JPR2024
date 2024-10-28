@@ -1,0 +1,1106 @@
+---
+title: "Cell_lines_XL_and_DIA"
+author: "Anna Bakhtina"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## load packages
+```{r}
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(svglite)
+library(ggrepel)
+library("broom")
+library(RColorBrewer)
+library (janitor)
+library (viridis)
+library(wesanderson)
+library(fishualize)
+library(GGally)
+library(circlize)
+library(gplots)
+
+```
+
+## upload XL data (supp_table_1 and supp_table_2)
+```{r}
+
+HEK_HeLa_path = file.choose(new = FALSE)
+input_HEK_HeLa_XL <- read_excel(HEK_HeLa_path)
+
+MCF7_HeLa_path = file.choose(new = FALSE)
+input_MCF7_HeLa_XL <- read_excel(MCF7_HeLa_path)
+
+```
+
+## clean up data
+```{r}
+
+# make a data frame with XLs, gene names, ratios, p-values. 95% intervals for HEK/HeLa 
+HEK_HeLa <- input_HEK_HeLa_XL %>%
+  mutate(crosslink = str_c(pepA, "_", modposA, "_", pepB, "_", modposB)) %>%
+  select(crosslink, NetworkDistance, uniprotA, uniprotB, modposA, modposB, geneA, geneB, starts_with("log2ratio"), starts_with("num_reps"), starts_with("95pct"), starts_with("pvalue")) %>%
+  mutate(XL_protein_name = str_c(uniprotA, "_", modposA, "_", uniprotB, "_", modposB)) %>%
+  mutate(XL_protein_name = str_remove_all(XL_protein_name, "_HUMAN")) %>%
+  mutate(XL_gene_name = str_c(geneA, "_", modposA, "_", geneB, "_", modposB)) %>%
+  mutate(link_type = case_when(str_detect(NetworkDistance, "Intra") == TRUE ~ "Intra", TRUE ~ "Inter"))
+
+# Function to count number of missing values
+count_NA <- function(x) {sum(is.na(x))}
+
+#Calculate number of NA values 
+HEK_HeLa_all_quants <- HEK_HeLa %>%
+  mutate(NA_count = apply(.[c('log2ratio_1_HEK', 'log2ratio_2_HeLa', 'log2ratio_3_HEK', 'log2ratio_4_HeLa')], 1, count_NA)) 
+  
+# make a data frame with XLs, gene names, ratios, p-values. 95% intervals for MCF7/HeLa
+MCF7_HeLa <- input_MCF7_HeLa_XL %>%
+  mutate(crosslink = str_c(pepA, "_", modposA, "_", pepB, "_", modposB)) %>%
+  select(crosslink, NetworkDistance, uniprotA, uniprotB, modposA, modposB, geneA, geneB, starts_with("log2ratio"), starts_with("num_reps"), starts_with("95pct"), starts_with("pvalue")) %>%
+  mutate(XL_protein_name = str_c(uniprotA, "_", modposA, "_", uniprotB, "_", modposB)) %>%
+  mutate(XL_protein_name = str_remove_all(XL_protein_name, "_HUMAN")) %>%
+  mutate(XL_gene_name = str_c(geneA, "_", modposA, "_", geneB, "_", modposB)) %>%
+  mutate(link_type = case_when(str_detect(NetworkDistance, "Intra") == TRUE ~ "Intra", TRUE ~ "Inter"))
+
+MCF7_col <- MCF7_HeLa %>%
+  select(contains('log2'))
+
+MCF7_quant_names <- colnames(MCF7_col)
+
+# calculate nu,ber of missing values for each cross-link
+MCF7_HeLa_all_quants <- MCF7_HeLa %>%
+  mutate(NA_count = apply(.[MCF7_quant_names], 1, count_NA))
+
+```
+
+## total number of quantified cross-links in all replicates pre-filter (Sup. Fig. 1A). 
+```{r}
+
+MCF_long_no_filters <- MCF7_HeLa_all_quants %>%
+  pivot_longer(col = starts_with("log2"), names_to = "biorep", values_to = "log2ratio") %>%
+  filter(!str_detect(biorep, "_3")) %>%
+  select(crosslink, biorep, log2ratio)
+
+HEK_long_no_filters <- HEK_HeLa_all_quants %>%
+  pivot_longer(col = starts_with("log2"), names_to = "biorep", values_to = "log2ratio") %>%
+  filter(str_detect(biorep, "_1|_2|_3|_4")) %>%
+  select(crosslink, biorep, log2ratio)
+
+HEK_MCF_all_quants <- bind_rows(HEK_long_no_filters, MCF_long_no_filters) %>%
+  filter(!is.na(log2ratio))
+
+```
+
+
+## Filter by numions
+```{r}
+
+# numions based long dataframe
+HEK_HeLa_long_numions <- HEK_HeLa_all_quants %>%
+    pivot_longer(cols = starts_with("num"), names_to = "biorep", values_to = "numions") 
+
+# numions boxplot for HEK_HeLa
+ion_number_boxplot_HEK_HeLa <- ggplot(HEK_HeLa_long_numions, aes(x = numions, y = biorep)) + 
+  geom_boxplot(aes(group = biorep, fill = biorep), alpha = 0.7) +
+  xlim(0, 40) +
+  theme_classic() 
+
+## filter for numions >= 4
+HEK_HeLa_long_numions_filtered <- HEK_HeLa_long_numions %>%
+  filter(numions > 3)
+
+HEK_HeLa_numions_filtered <- HEK_HeLa_long_numions_filtered %>%
+  pivot_wider(names_from = biorep, values_from = numions) 
+
+#############
+#############
+
+# numions based long dataframe for MCF7
+MCF_HeLa_long_numions <- MCF7_HeLa_all_quants %>%
+    pivot_longer(cols = starts_with("num"), names_to = "biorep", values_to = "numions") 
+
+# numions boxplot for HEK_HeLa
+ion_number_boxplot_MCF7_HeLa <- ggplot(MCF_HeLa_long_numions, aes(x = numions, y = biorep)) + 
+  geom_boxplot(aes(group = biorep, fill = biorep), alpha = 0.7) +
+  xlim(0, 40) +
+  theme_classic() 
+
+## filter for numions >= 4
+MCF_HeLa_long_numions_filtered <- MCF_HeLa_long_numions %>%
+  filter(numions > 3)
+
+MCF_HeLa_numions_filtered <- MCF_HeLa_long_numions_filtered %>%
+  pivot_wider(names_from = biorep, values_from = numions) 
+
+```
+
+## Filter by confidence
+```{r}
+# confidence based long dataframe
+HEK_HeLa_long_confidence <- HEK_HeLa_numions_filtered %>%
+    pivot_longer(cols = starts_with("95pct"), names_to = "biorep", values_to = "confidence") 
+
+## filter for confidence < 0.5
+HEK_HeLa_long_confidence_filtered <- HEK_HeLa_long_confidence %>%
+  filter(confidence <= 0.5)
+
+HEK_HeLa_filtered <- HEK_HeLa_long_confidence_filtered %>%
+  pivot_wider(names_from = biorep, values_from = confidence) 
+
+HEK_HeLa_long_filtered <- HEK_HeLa_filtered %>%   
+  pivot_longer(cols = starts_with("log2"), names_to = "biorep", values_to = "log2ratio") 
+
+#########
+#########
+
+
+# confidence based long dataframe
+MCF_HeLa_long_confidence <- MCF_HeLa_numions_filtered %>%
+    pivot_longer(cols = starts_with("95pct"), names_to = "biorep", values_to = "confidence") 
+
+## filter for confidence < 0.5
+MCF_HeLa_long_confidence_filtered <- MCF_HeLa_long_confidence %>%
+  filter(confidence <= 0.5)
+
+MCF_HeLa_filtered <- MCF_HeLa_long_confidence_filtered %>%
+  pivot_wider(names_from = biorep, values_from = confidence) 
+
+MCF_HeLa_long_filtered <- MCF_HeLa_filtered %>%   
+  pivot_longer(cols = starts_with("log2"), names_to = "biorep", values_to = "log2ratio") 
+
+```
+
+## number of filtered cross-links (Fig. 1A)
+```{r}
+
+MCF_long_filtered_2_reps <- MCF_HeLa_long_filtered %>%
+  filter(!str_detect(biorep, "_3")) %>%
+  select(crosslink, biorep, log2ratio) %>%
+  filter(!is.na(log2ratio))
+
+MCF_2_reps_bar_XL_quant_counts_filtered <- ggplot(data = MCF_long_filtered_2_reps, aes(x = biorep, fill = biorep, alpha = 0.5)) +
+  geom_bar(stat = "count", color = "black") +
+  theme_classic() +
+  geom_text(stat = 'count', aes(label=after_stat(count)), vjust=-0.5, size=3) +
+  scale_fill_fish_d(option = "Acanthurus_olivaceus", direction = 1, alpha = 0.6) 
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/MCF_2_reps_bar_XL_quant_counts_filtered.svg", plot = MCF_2_reps_bar_XL_quant_counts_filtered, width = 10, height = 8)
+
+HEK_long_filtered_4_reps <- HEK_HeLa_long_filtered %>%
+  filter(str_detect(biorep, "_1|_2|_3|_4")) %>%
+  select(crosslink, biorep, log2ratio) %>%
+  filter(!is.na(log2ratio))
+
+HEK_4_reps_bar_XL_quant_counts_filtered <- ggplot(data = HEK_long_filtered_4_reps, aes(x = biorep, fill = biorep, alpha = 0.5)) +
+  geom_bar(stat = "count", color = "black") +
+  theme_classic() +
+  geom_text(stat = 'count', aes(label=after_stat(count)), vjust=-0.5, size=3) +
+  scale_fill_fish_d(option = "Stethojulis_bandanensis", direction = -1, alpha = 0.6) 
+
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/HEK_4_reps_bar_XL_quant_counts_filtered.svg", plot = HEK_4_reps_bar_XL_quant_counts_filtered, width = 10, height = 8)
+
+```
+
+## Distributions of log2 ratios XL (Fig. 1B)
+```{r}
+
+HEK_HeLa_distributions <-  ggplot(data = HEK_long_filtered_4_reps, aes(x = log2ratio, fill = biorep, alpha = 0.5)) +
+  geom_density( color = "black") +
+  theme_classic() +
+  scale_fill_fish_d(option = "Stethojulis_bandanensis", direction = -1, alpha = 0.6) 
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/HEK_HeLa_distributions.svg", plot = HEK_HeLa_distributions, width = 10, height = 8)
+
+
+MCF_HeLa_long_filtered_2_bioreps <- MCF_HeLa_long_filtered %>%
+  filter(str_detect(biorep, "_1|_2"))
+  
+MCF_HeLa_distributions <- ggplot(data = MCF_HeLa_long_filtered_2_bioreps, aes(x = log2ratio, fill = biorep, alpha = 0.5)) +
+  geom_density( color = "black") +
+  theme_classic() +
+  scale_fill_fish_d(option = "Acanthurus_olivaceus", direction = 1, alpha = 0.6)
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/MCF_HeLa_distributions.svg", plot = MCF_HeLa_distributions, width = 10, height = 8)
+
+```
+
+## Difference to the mean (Supp. Fig. 1C)
+```{r}
+
+# group cross-links by sites
+MCF_by_site <- MCF_HeLa_long_filtered %>%
+  group_by(XL_protein_name) %>%
+  filter(str_detect(biorep, "_3")) %>%
+  mutate(stdev = sd(log2ratio)) %>%
+  mutate(site_mean = mean(log2ratio)) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(diff_to_mean = abs(site_mean - log2ratio)) %>%
+  filter(!is.na(stdev))
+
+# differences to the mean for cross-links at the same site
+ggplot(MCF_by_site, aes(x = diff_to_mean)) +
+  geom_histogram(binwidth = 0.025) +
+  theme_classic()
+
+# cross-links by site
+HEK_by_site <- HEK_HeLa_long_filtered %>%
+  group_by(XL_protein_name) %>%
+  filter(str_detect(biorep, "_7")) %>%
+  mutate(stdev = sd(log2ratio)) %>%
+  mutate(site_mean = mean(log2ratio)) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(diff_to_mean = abs(site_mean - log2ratio)) %>%
+  filter(!is.na(stdev))
+
+# differences to the mean for crosslinks at the same site
+ggplot(HEK_by_site, aes(x = diff_to_mean)) +
+  geom_histogram(binwidth = 0.025) +
+  theme_classic()
+
+```
+
+## Filter for NA number (0 missing for MCF7/HeLa, no more than one missing value for HEK/HeLa)
+```{r}
+
+MCF_HeLa_filtered <- MCF_HeLa_filtered %>%
+  filter(NA_count == 0)
+
+MCF_HeLa_long_filtered <- MCF_HeLa_filtered %>%   
+  pivot_longer(cols = starts_with("log2"), names_to = "biorep", values_to = "log2ratio") 
+
+HEK_HeLa_filtered <- HEK_HeLa_filtered %>%
+  filter(NA_count < 2)
+
+HEK_HeLa_long_filtered <- HEK_HeLa_filtered %>%   
+  pivot_longer(cols = starts_with("log2"), names_to = "biorep", values_to = "log2ratio") %>%
+  filter(str_detect(biorep, "_1|_2|_3|_4|_7")) 
+
+```
+
+
+## Volcano plots for XLs (Fig. 1E-F)
+```{r}
+
+MCF_HeLa_filtered <- MCF_HeLa_filtered %>%
+  mutate(pval_Bon = pvalue_3_MCF7_SH_iqPIR*length(MCF_HeLa_filtered$pvalue_3_MCF7_SH_iqPIR)) %>%
+  mutate(pval_Bon_log10 = -log10(pval_Bon)) 
+
+MCF_sig_pos_log2_cutoff_05 <- MCF_HeLa_filtered %>%
+  filter(pval_Bon < 0.01) %>%
+  filter(log2ratio_3_MCF7_SH_iqPIR > 0.5)
+
+MCF_sig_neg_log2_cutoff_05 <- MCF_HeLa_filtered %>%
+  filter(pval_Bon < 0.01) %>%
+  filter(log2ratio_3_MCF7_SH_iqPIR < -0.5)
+
+MCF_non_sig_log2_cutoff <- MCF_HeLa_filtered %>%
+  filter(pval_Bon > 0.01) 
+  #filter(log2ratio > -1.11 & log2ratio < 0.69)
+
+# volcano plot with 95% conf < 0.5 and 0 miss values
+volcano_MCF_log2_05 <- ggplot(MCF_HeLa_filtered, aes(x = log2ratio_3_MCF7_SH_iqPIR, y = pval_Bon_log10)) +
+  geom_point(color = 'grey') +
+  theme_classic() +
+  geom_hline(yintercept = -log10(0.01), colour = "black", size = 1, alpha = 0.7) +
+  geom_vline(xintercept = -0.5, colour = "black", size = 1, alpha = 0.7) +
+  geom_vline(xintercept = 0.5, colour = "black", size = 1, alpha = 0.7) +
+  #xlim(-2.0, 2.0) +
+  geom_point(data = MCF_sig_neg_log2_cutoff_05,
+             aes(x = log2ratio_3_MCF7_SH_iqPIR, y = pval_Bon_log10), color = "blue3") +
+  geom_point(data = MCF_sig_pos_log2_cutoff_05,
+             aes(x = log2ratio_3_MCF7_SH_iqPIR, y = pval_Bon_log10), color = "red3")
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/volcano_MCF_log2_05.svg", plot = volcano_MCF_log2_05, width = 10, height = 8)
+
+##########
+#########
+
+HEK_HeLa_filtered <- HEK_HeLa_filtered %>%
+  mutate(pval_Bon = pvalue_7_All_ratios*length(HEK_HeLa_filtered$pvalue_7_All_ratios)) %>%
+  mutate(pval_Bon_log10 = -log10(pval_Bon)) 
+
+# %>%
+#   mutate(pval_Bon_log10 = case_when(pval_Bon_log10 > 20 ~ 20, pval_Bon_log10 < 0 ~ 0,  pval_Bon_log10 < 20 & pval_Bon_log10 > 0 ~ pval_Bon_log10))
+
+#pval_Bon <- 0.01 / length(MCF_HeLa_filtered$pvalue_3_MCF7_SH_iqPIR) 
+
+HEK_sig_pos_log2_cutoff_05 <- HEK_HeLa_filtered %>%
+  filter(pval_Bon < 0.01) %>%
+  filter(log2ratio_7_All_ratios > 0.5)
+
+HEK_sig_neg_log2_cutoff_05 <- HEK_HeLa_filtered %>%
+  filter(pval_Bon < 0.01) %>%
+  filter(log2ratio_7_All_ratios < -0.5)
+
+HEK_non_sig_log2_cutoff <- HEK_HeLa_filtered %>%
+  filter(pval_Bon > 0.01) 
+  #filter(log2ratio > -1.11 & log2ratio < 0.69)
+
+# volcano plot with 95% conf < 0.5 and 2 miss values
+volcano_HEK_log2_05 <- ggplot(HEK_HeLa_filtered, aes(x = log2ratio_7_All_ratios, y = pval_Bon_log10)) +
+  geom_point(color = 'grey') +
+  theme_classic() +
+  geom_hline(yintercept = -log10(0.01), colour = "black", size = 1, alpha = 0.7) +
+  geom_vline(xintercept = -0.5, colour = "black", size = 1, alpha = 0.7) +
+  geom_vline(xintercept = 0.5, colour = "black", size = 1, alpha = 0.7) +
+  #xlim(-2.0, 2.0) +
+  geom_point(data = HEK_sig_neg_log2_cutoff_05,
+             aes(x = log2ratio_7_All_ratios, y = pval_Bon_log10), color = "blue3") +
+  geom_point(data = HEK_sig_pos_log2_cutoff_05,
+             aes(x = log2ratio_7_All_ratios, y = pval_Bon_log10), color = "red3")
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/volcano_HEK_log2_05.svg", plot = volcano_HEK_log2_05, width = 10, height = 8)
+```
+
+
+## correlation between XL replicates (Fig. 1C,D)
+```{r}
+
+# correlation plot for HEK/HeLa
+HEK_corr_XL_reps<- ggplot(HEK_HeLa_filtered, aes(x = log2ratio_1_HEK, y = log2ratio_2_HeLa)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(method=lm, se = FALSE) +
+  xlim(-4,4) +
+  ylim(-4,4)
+
+HEK_fit_XL <- lm(log2ratio_2_HeLa ~ log2ratio_1_HEK, data = HEK_HeLa_filtered)
+summary(HEK_fit_XL)
+
+correlation_HEK <- cor(HEK_HeLa_filtered$log2ratio_2_HeLa, HEK_HeLa_filtered$log2ratio_1_HEK, use = "complete.obs")
+
+r_squared_HEK <- correlation_HEK^2
+
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/HEK_XL_corr.svg", plot = HEK_corr_XL_reps, width = 10, height = 8)
+
+# correlation plot for MCF7/HeLa
+MCF_corr_XL_reps<- ggplot(MCF_HeLa_filtered, aes(x = log2ratio_1_MCF7_RH_iqPIR, y = log2ratio_2_MCF7_SH_iqPIR)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(method=lm, se = FALSE) +
+  xlim(-5,5) +
+  ylim(-5,5)
+
+MCF_fit_XL <- lm(log2ratio_1_MCF7_RH_iqPIR ~ log2ratio_2_MCF7_SH_iqPIR, data = MCF_HeLa_filtered)
+summary(MCF_fit_XL)
+
+correlation_MCF <- cor(MCF_HeLa_filtered$log2ratio_1_MCF7_RH_iqPIR, MCF_HeLa_filtered$log2ratio_2_MCF7_SH_iqPIR, use = "complete.obs")
+
+r_squared_MCF <- correlation_MCF^2
+
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/MCF_XL_corr.svg", plot = MCF_corr_XL_reps, width = 10, height = 8)
+```
+
+## HEATMAP of common cross-links (Supp. Fig. 2D)
+```{r}
+
+HEK_To_combine <- HEK_HeLa_filtered %>%
+  select(crosslink, link_type, XL_protein_name, log2ratio_5_Fwd_all, log2ratio_6_Rev_all, log2ratio_7_All_ratios) %>%
+  rename(HEK_HeLa_XL_ratio_1 = log2ratio_5_Fwd_all, 
+         HEK_HeLa_XL_ratio_2 = log2ratio_6_Rev_all,
+         HEK_HeLa_XL_ratio_comb = log2ratio_7_All_ratios)
+
+MCF_To_combine <- MCF_HeLa_filtered %>%
+  select(crosslink, link_type, XL_protein_name, starts_with("log2")) %>%
+  rename(MCF7_HeLa_XL_ratio_1 = log2ratio_1_MCF7_RH_iqPIR, 
+         MCF7_HeLa_XL_ratio_2 = log2ratio_2_MCF7_SH_iqPIR,
+         MCF7_HeLa_XL_ratio_comb = log2ratio_3_MCF7_SH_iqPIR)
+
+MCF_and_HEK_common <- inner_join(HEK_To_combine, MCF_To_combine, by = 'crosslink') %>%
+  select(-contains(".y"))
+
+for_heatamp <- MCF_and_HEK_common %>%
+  select(contains("comb")) %>%
+  arrange(desc(MCF7_HeLa_XL_ratio_comb)) %>%
+  as.matrix()
+  
+#install.packages("pheatmap")
+
+library(pheatmap)
+
+col <- colorRampPalette(brewer.pal(5, "RdBu"))(256)
+reversed_color_scheme <- rev(col)
+
+heatmap_common_MCF7_HEK_cluster <- pheatmap(for_heatamp, col=reversed_color_scheme, show_colnames = FALSE, cluster_rows = TRUE, cluster_cols = FALSE)
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/heatmap_common_MCF7_HEK_cluster.svg", plot = heatmap_common_MCF7_HEK_cluster, width = 10, height = 8)
+```
+
+## RNA proteins XL (Fig. 3A left)
+```{r}
+
+RNA_list <- c('HNRPQ', 'HNRPC', 'ROA1', 'RALY', 'HNRPM', 'HNRPL', 'ROA2', 'ROA3', 'HNRPK', 'YBOX1', 'GOGB1', 'ROA0','HNRPD', 'ROAA', 'TITIN',
+             'RBMX', 'HNRPF', 'HNRPR')
+
+RNA_XLs_MCF <- MCF_HeLa_long_filtered %>%
+  filter(str_detect(XL_protein_name, paste(RNA_list, collapse="|"))) %>%
+  dplyr::select(crosslink, XL_protein_name, biorep, log2ratio)
+
+RNA_XLs_HEK <- HEK_HeLa_long_filtered %>%
+  filter(str_detect(XL_protein_name, paste(RNA_list, collapse="|"))) %>%
+  dplyr::select(crosslink, XL_protein_name, biorep, log2ratio)
+
+
+RNA_XLs_MCF_and_HEK <- bind_rows(RNA_XLs_MCF, RNA_XLs_HEK) %>%
+  mutate(cell_line = case_when(str_detect(biorep, "MCF7") ~ "MCF7", str_detect(biorep, "HEK|HeLa|All") ~ "HEK293")) %>%
+  filter(str_detect(biorep, "_7_All|_3_MCF"))
+
+NCF7_HEK_XLs <- bind_rows(MCF_HeLa_long_filtered, HEK_HeLa_long_filtered) %>%
+  mutate(cell_line = case_when(str_detect(biorep, "MCF7") ~ "MCF7", str_detect(biorep, "HEK|HeLa|All") ~ "HEK293")) %>%
+  filter(str_detect(biorep, "_7_All|_3_MCF"))
+
+XL_log2_distributions_RNABPs <- ggplot(data = RNA_XLs_MCF_and_HEK, aes(x = log2ratio, fill = cell_line, alpha = 0.6)) +
+  geom_density( color = "black") +
+  theme_classic() +
+  xlim(-5,5)
+
+XL_log2_distributions_all <- ggplot(data = NCF7_HEK_XLs, aes(x = log2ratio, fill = cell_line, alpha = 0.5)) +
+  geom_density( color = "black") +
+  theme_classic() +
+  xlim(-5,5)
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/XL_log2_distributions_RNABPs.svg", plot = XL_log2_distributions_RNABPs, width = 10, height = 8)
+
+
+```
+
+## SMCA5 XLs (Fig. 4A)
+```{r}
+
+# choose SMCA5 links and make the maximum xhanges +/- 2.5
+SMCA5_HEK <- HEK_HeLa_filtered_long_4_bioreps %>%
+  filter(str_detect(XL_protein_name, "SMCA")) %>%
+  mutate(log2ratio = case_when(log2ratio > 2.5 ~  2.5, log2ratio < -2.5 ~  -2.5, TRUE ~ log2ratio))
+
+# generate heat map for 3b
+HEK_HeLa_SMCA5_XLs <- ggplot(SMCA5_HEK, aes(x = biorep, y = crosslink, fill = log2ratio)) + 
+  geom_tile() + 
+  theme(axis.title.y = element_blank(),
+        #axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  #scale_fill_distiller(palette = 'RdYlGn', direction = -1) 
+  scale_fill_gradient2(low = "green4", mid = "white", high = "firebrick2", limits = c(-2.5,2.5)) +
+  theme_minimal()
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/HEK_HeLa_SMCA5_XLs.svg", plot = HEK_HeLa_SMCA5_XLs, width = 10, height = 8)
+
+
+SMCA5_MCF7 <- MCF_HeLa_long_filtered %>%
+  filter(str_detect(XL_protein_name, "SMCA5")) %>%
+  mutate(log2ratio = case_when(log2ratio > 2.5 ~  2.5, log2ratio < -2.5 ~  -2.5, TRUE ~ log2ratio))
+
+# generate heat map for 3b
+MCF7_SMCA5_XL <- ggplot(SMCA5_MCF7, aes(x = biorep, y = crosslink, fill = log2ratio)) + 
+  geom_tile() + 
+  theme(axis.title.y = element_blank(),
+        #axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  #scale_fill_distiller(palette = 'RdYlGn', direction = -1) 
+  scale_fill_gradient2(low = "green4", mid = "white", high = "firebrick2", limits = c(-2.5,2.5)) +
+  theme_minimal()
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/MCF7_SMCA5_XL.svg", plot = MCF7_SMCA5_XL, width = 10, height = 8)
+
+```
+
+
+## LGUL Xls (Fig. 5A)
+```{r}
+
+# choose SMCA5 links and make the maximum xhanges +/- 2.5
+LGUL_HEK <- HEK_HeLa_filtered_long_4_bioreps %>%
+  filter(str_detect(XL_protein_name, "LGUL")) %>%
+  mutate(log2ratio = case_when(log2ratio > 2.5 ~  2.5, log2ratio < -2.5 ~  -2.5, TRUE ~ log2ratio))
+
+# generate heat map for 3b
+HEK_HeLa_LGUL_XLs <- ggplot(LGUL_HEK, aes(x = biorep, y = crosslink, fill = log2ratio)) + 
+  geom_tile() + 
+  theme(axis.title.y = element_blank(),
+        #axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  #scale_fill_distiller(palette = 'RdYlGn', direction = -1) 
+  scale_fill_gradient2(low = "green4", mid = "white", high = "firebrick2", limits = c(-2.5,2.5)) +
+  theme_minimal()
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/HEK_HeLa_LGUL_XLs.svg", plot = HEK_HeLa_LGUL_XLs, width = 10, height = 8)
+
+
+LGUL_MCF7 <- MCF_HeLa_long_filtered %>%
+  filter(str_detect(XL_protein_name, "LGUL")) %>%
+  mutate(log2ratio = case_when(log2ratio > 2.5 ~  2.5, log2ratio < -2.5 ~  -2.5, TRUE ~ log2ratio))
+
+# generate heat map for 3b
+MCF7_LGUL_XL <- ggplot(LGUL_MCF7, aes(x = biorep, y = crosslink, fill = log2ratio)) + 
+  geom_tile() + 
+  theme(axis.title.y = element_blank(),
+        #axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  #scale_fill_distiller(palette = 'RdYlGn', direction = -1) 
+  scale_fill_gradient2(low = "green4", mid = "white", high = "firebrick2", limits = c(-2.5,2.5)) +
+  theme_minimal()
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/MCF7_LGUL_XL.svg", plot = MCF7_LGUL_XL, width = 10, height = 8)
+
+```
+
+## ADT2/ADT3 XLs (Fig. 6A)
+```{r}
+
+# choose ADT2 and ADT3 links and make the maximum changes +/- 2.5
+ADT_MCF7 <- MCF_HeLa_long_filtered %>%
+  filter(str_detect(XL_protein_name, "ADT2|ADT3")) %>%
+  mutate(log2ratio = case_when(log2ratio > 2.5 ~  2.5, log2ratio < -2.5 ~  -2.5, TRUE ~ log2ratio))
+
+# generate heat map for 3b
+MCF7_ADT_XL <- ggplot(ADT_MCF7, aes(x = biorep, y = crosslink, fill = log2ratio)) + 
+  geom_tile() + 
+  theme(axis.title.y = element_blank(),
+        #axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  #scale_fill_distiller(palette = 'RdYlGn', direction = -1) 
+  scale_fill_gradient2(low = "green4", mid = "white", high = "firebrick2", limits = c(-2.5,2.5)) +
+  theme_minimal()
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/MCF7_ADT_XL.svg", plot = MCF7_ADT_XL, width = 10, height = 8)
+
+
+# choose ADT2 and ADT3 links and make the maximum changes +/- 2.5
+ADT_HEK_XL <- HEK_HeLa_filtered_long_4_bioreps %>%
+  filter(str_detect(XL_protein_name, "ADT2|ADT3")) %>%
+  mutate(log2ratio = case_when(log2ratio > 2.5 ~  2.5, log2ratio < -2.5 ~  -2.5, TRUE ~ log2ratio))
+
+# generate heat map for 3b
+HEK_ADT_heatmap_XL <- ggplot(ADT_HEK_XL, aes(x = biorep, y = crosslink, fill = log2ratio)) + 
+  geom_tile() + 
+  theme(axis.title.y = element_blank(),
+        #axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  #scale_fill_distiller(palette = 'RdYlGn', direction = -1) 
+  scale_fill_gradient2(low = "green4", mid = "white", high = "firebrick2", limits = c(-2.5,2.5)) +
+  theme_minimal()
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/HEK_ADT_heatmap_XL.svg", plot = HEK_ADT_heatmap_XL, width = 10, height = 8)
+```
+
+
+## upload protein quants (EncyclopeDIA output "cell_lines_DIA_quants.txt')
+```{r}
+
+cell_lines_DIA_path = file.choose(new = FALSE)
+
+input_cell_lines_DIA <- read.table(cell_lines_DIA_path, header = TRUE) 
+```
+
+## format data table of DIA quants
+```{r}
+
+quant_col <- input_cell_lines_DIA %>%
+  select(starts_with('X'))
+
+quant_names <- colnames(quant_col)
+
+cell_lines = c("HeLa", "HEK293", "MCF7")
+
+cell_lines_DIA <- input_cell_lines_DIA %>%
+  pivot_longer(all_of(quant_names), names_to = "sample", values_to = "quant") %>%
+  mutate(log2_quant = log2(quant)) %>%
+  mutate(sample_name = str_sub(sample, 29, -6)) %>%
+  mutate(cell_type = case_when(str_detect(sample_name, "HEK") ~ "HEK293", str_detect(sample_name, "HeLa") ~ "HeLa", str_detect(sample_name, "MCF") ~ "MCF7")) %>%
+  separate(Protein, sep = "\\|", into = c("V1", "V2", "V3")) %>%
+  separate(V3, sep = "_", into = c("Protein", "V4")) %>%
+  select (-V1, -V2, -V4)
+
+cell_lines_log2 <- cell_lines_DIA %>%
+  select (-sample, -quant, -cell_type) %>%
+  pivot_wider(names_from = sample_name, values_from = log2_quant)
+
+```
+
+## Distributions of log2 transformed quants (supp figure 1E)
+```{r}
+
+cell_lines_DIA_distributions <- ggplot(cell_lines_DIA, aes(x = log2_quant)) + 
+  geom_density(aes(group = cell_type, fill = cell_type), alpha = 0.5) +
+  xlim(5,35) +
+  theme_classic() +
+  scale_fill_fish_d(option = "Stethojulis_bandanensis", direction = -1, alpha = 0.6) 
+  
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/DIA_dist_cell_line_average.svg", plot = cell_lines_DIA_distributions, width = 10, height = 8)
+
+```
+
+## DIA median normalization
+```{r}
+# convert infinite log2 values to NA
+cell_lines_DIA[sapply(cell_lines_DIA, is.infinite)] <- NA
+
+# calculate median (and mean) for each sample
+median_norm <- cell_lines_DIA %>%
+  group_by(sample_name) %>%
+  mutate(sample_mean = mean(log2_quant, na.rm = TRUE)) %>%
+  mutate(sample_median = median(log2_quant, na.rm = TRUE)) %>%
+  ungroup()
+
+medians <- median_norm %>%
+  select(sample_median) %>%
+  distinct()
+
+# normalize to the lowest median
+cell_lines_DIA_median_norm <- median_norm %>%
+  mutate(diff_to_lowest_median = sample_median - min(sample_median)) %>%
+  mutate(log2_median_norm = log2_quant - diff_to_lowest_median)
+  
+
+cell_lines_DIA_distributions_median_norm <- ggplot(cell_lines_DIA_median_norm, aes(x = log2_median_norm)) + 
+  geom_density(aes(group = cell_type, fill = cell_type), alpha = 0.5) +
+  xlim(10,35) +
+  theme_classic() +
+  scale_fill_viridis_d()
+
+cell_lines_DIA_norm_wide <-  cell_lines_DIA_median_norm %>%
+  dplyr::select(Protein, sample_name, log2_median_norm) %>%
+  pivot_wider(names_from = sample_name, values_from = log2_median_norm)
+```
+
+
+## DIA t-test (supp. figure 1G)
+```{r}
+
+count_NA <- function(x) {sum(is.na(x))}
+
+cell_lines_DIA_for_t_test <- cell_lines_DIA_norm_wide %>%
+  as.data.frame()%>%
+  mutate(NA_count = rowSums(is.na(select(., 2:10))))%>%
+  filter(NA_count == 0) %>%
+  dplyr:: select(-NA_count) 
+
+HEK_HeLa_DIA_t_test <- cell_lines_DIA_for_t_test %>%
+  dplyr::select(c(starts_with("HEK"), starts_with("HeLa")))
+
+# Loop through each row (protein)
+t_test_results_DIA_HEK_HeLa <- apply(HEK_HeLa_DIA_t_test, 1, function(row) {
+  # Extract values for Group A and Group B
+  group_HEK <- row[1:3]
+  group_HeLa <- row[4:6]
+  
+  # Perform t-test
+  t_test_result <- t.test(group_HEK, group_HeLa)
+  
+  # Return p-value
+  return(t_test_result$p.value)
+})
+
+# Add p-values to dataframe
+cell_lines_DIA_for_t_test$p_value_HEK_HeLa <- t_test_results_DIA_HEK_HeLa
+
+###########
+##########
+
+MCF_HeLa_DIA_t_test <- cell_lines_DIA_for_t_test %>%
+  dplyr::select(c(starts_with("MCF"), starts_with("HeLa")))
+
+# Loop through each row (protein)
+t_test_results_DIA_MCF_HeLa <- apply(MCF_HeLa_DIA_t_test, 1, function(row) {
+  # Extract values for Group A and Group B
+  group_MCF <- row[1:3]
+  group_HeLa <- row[4:6]
+  
+  # Perform t-test
+  t_test_result <- t.test(group_MCF, group_HeLa)
+  
+  # Return p-value
+  return(t_test_result$p.value)
+})
+
+# Add p-values to dataframe
+cell_lines_DIA_for_t_test$p_value_MCF_HeLa <- t_test_results_DIA_MCF_HeLa
+
+cell_lines_DIA_with_t_test <- cell_lines_DIA_for_t_test %>%
+  as.data.frame() %>%
+  mutate(p_value_HEK_HeLa_BH = p.adjust(p_value_HEK_HeLa, method = "BH")) %>%
+  mutate(p_value_MCF_HeLa_BH = p.adjust(p_value_MCF_HeLa, method = "BH")) %>%
+  mutate(mean_HEK = rowMeans(select(., starts_with("HEK")))) %>%
+  mutate(mean_HeLa = rowMeans(select(., starts_with("HeLa")))) %>%
+  mutate(mean_MCF = rowMeans(select(., starts_with("MCF")))) %>%
+  mutate(FC_HEK_HeLa = mean_HEK - mean_HeLa) %>%
+  mutate(FC_MCF_HeLa = mean_MCF - mean_HeLa) %>%
+  mutate(log10_p_BH_HEK = -log10(p_value_HEK_HeLa_BH)) %>%
+  mutate(log10_p_BH_MCF = -log10(p_value_MCF_HeLa_BH))
+
+
+HEK_HeLa_DIA_with_t_test_pos <- cell_lines_DIA_with_t_test %>%
+  filter(p_value_HEK_HeLa_BH < 0.05) %>%
+  filter(FC_HEK_HeLa > 1)
+
+HEK_HeLa_DIA_with_t_test_neg <- cell_lines_DIA_with_t_test %>%
+  filter(p_value_HEK_HeLa_BH < 0.05) %>%
+  filter(FC_HEK_HeLa < -1)
+
+HEK_HeLa_DIA_with_t_test_non_sig <- cell_lines_DIA_with_t_test %>%
+  filter(p_value_HEK_HeLa_BH > 0.05) 
+  #filter(FC < -0.5)
+
+# volcano plot with 95% conf < 0.5 and 2 miss values
+volcano_HEK_HeLa_DIA <- ggplot(cell_lines_DIA_with_t_test, aes(x = FC_HEK_HeLa, y = log10_p_BH_HEK)) +
+  geom_point(color = 'grey') +
+  theme_classic() +
+  geom_hline(yintercept = -log10(0.05), colour = "black", size = 1, alpha = 0.7) +
+  geom_vline(xintercept = -1, colour = "black", size = 1, alpha = 0.7) +
+  geom_vline(xintercept = 1, colour = "black", size = 1, alpha = 0.7) +
+  #xlim(-2.0, 2.0) +
+  geom_point(data = HEK_HeLa_DIA_with_t_test_neg,
+             aes(x = FC_HEK_HeLa, y = log10_p_BH_HEK), color = "blue3") +
+  #geom_text(data = HEK_HeLa_DIA_with_t_test_neg, aes(label = Protein), vjust = -0.5) +
+  geom_point(data = HEK_HeLa_DIA_with_t_test_pos,
+             aes(x = FC_HEK_HeLa, y = log10_p_BH_HEK), color = "red3") 
+  #geom_text(data = HEK_HeLa_DIA_with_t_test_pos, aes(label = Protein), vjust = -0.5)
+
+
+
+MCF_HeLa_DIA_with_t_test_pos <- cell_lines_DIA_with_t_test %>%
+  filter(p_value_MCF_HeLa_BH < 0.05) %>%
+  filter(FC_MCF_HeLa > 1)
+
+MCF_HeLa_DIA_with_t_test_neg <- cell_lines_DIA_with_t_test %>%
+  filter(p_value_MCF_HeLa_BH < 0.05) %>%
+  filter(FC_MCF_HeLa < -1)
+
+MCF_HeLa_DIA_with_t_test_non_sig <- cell_lines_DIA_with_t_test %>%
+  filter(p_value_MCF_HeLa_BH > 0.05) 
+  #filter(FC < -0.5)
+
+# volcano plot with 95% conf < 0.5 and 2 miss values
+volcano_MCF_HeLa_DIA <- ggplot(cell_lines_DIA_with_t_test, aes(x = FC_MCF_HeLa, y = log10_p_BH_MCF)) +
+  geom_point(color = 'grey') +
+  theme_classic() +
+  geom_hline(yintercept = -log10(0.05), colour = "black", size = 1, alpha = 0.7) +
+  geom_vline(xintercept = -1, colour = "black", size = 1, alpha = 0.7) +
+  geom_vline(xintercept = 1, colour = "black", size = 1, alpha = 0.7) +
+  #xlim(-2.0, 2.0) +
+  geom_point(data = MCF_HeLa_DIA_with_t_test_neg,
+             aes(x = FC_MCF_HeLa, y = log10_p_BH_MCF), color = "blue3") +
+  #geom_text(data = HEK_HeLa_DIA_with_t_test_neg, aes(label = Protein), vjust = -0.5) +
+  geom_point(data = MCF_HeLa_DIA_with_t_test_pos,
+             aes(x = FC_MCF_HeLa, y = log10_p_BH_MCF), color = "red3") 
+  #geom_text(data = HEK_HeLa_DIA_with_t_test_pos, aes(label = Protein), vjust = -0.5)
+
+#Bonferroni_005_DIA_cutoff <- 0.05/779
+
+```
+
+
+## calculate log2 fold changes for DIA quants
+```{r}
+
+cell_lines_DIA_ave <- cell_lines_DIA_median_norm %>%
+  mutate(protein_by_cell_type = str_c(Protein, "_", cell_type)) %>%
+  group_by(protein_by_cell_type) %>%
+  mutate(cell_mean = mean(log2_median_norm, na.rm = TRUE)) %>%
+  ungroup()
+
+cell_lines_average_wide <- cell_lines_DIA_ave %>%
+  select(Protein, cell_type, cell_mean) %>%
+  distinct() %>%
+  pivot_wider(names_from = cell_type, values_from = cell_mean) %>%
+  mutate(log2_FC_HEK_HeLa = HEK293 - HeLa,
+         log2_FC_MCF7_HeLa = MCF7 - HeLa)
+
+cell_lines_DIA_log2_FC_long <- cell_lines_average_wide %>%
+  pivot_longer(cols = c(log2_FC_HEK_HeLa, log2_FC_MCF7_HeLa), names_to = "cell_line", values_to = "log2_FC")
+```
+
+
+## Comparing intra XL ratios to DIA protein ratios (Fig. 1G)
+```{r}
+
+HEK_only_combined <- HEK_HeLa_filtered_long %>%
+  filter(str_detect(biorep, "All_ratios")) %>%
+  select(crosslink, uniprotA, uniprotB, link_type, log2ratio) %>%
+  mutate(uniprotA = str_remove(uniprotA, "_HUMAN"),
+         uniprotB = str_remove(uniprotB, "_HUMAN"))
+  
+  
+HEK_intra_comb_ratio <- HEK_only_combined %>%
+  filter(str_detect(link_type, "Intra")) %>%
+  mutate(Protein = uniprotA) %>%
+  select(-uniprotB, -uniprotA) %>%
+  rename(log2ratio_XL = log2ratio)
+  
+HEK_XL_and_DIA <- left_join(HEK_intra_comb_ratio, cell_lines_average_wide, by = 'Protein')  
+  
+
+HEK_corr_XL_and_DIA <- ggplot(HEK_XL_and_DIA, aes(x = log2ratio_XL, y = log2_FC_HEK_HeLa)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(method=lm, se = FALSE) +
+  xlim(-4,4) +
+  ylim(-4,4)
+
+## R2 calculation for corr between DIA quant and XL quant in HEK/HeLa
+fit_between_XL_DIA_HEK <- lm(log2ratio_XL ~ log2_FC_HEK_HeLa, data = HEK_XL_and_DIA)
+summary(fit_between_XL_DIA_HEK)
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/HEK_XL_to_DIA_corr.svg", plot = HEK_corr_XL_and_DIA, width = 10, height = 8)
+
+
+MCF_only_combined <- MCF_HeLa_long_filtered %>%
+  filter(str_detect(biorep, "_3")) %>%
+  select(crosslink, uniprotA, uniprotB, link_type, log2ratio) %>%
+  mutate(uniprotA = str_remove(uniprotA, "_HUMAN"),
+         uniprotB = str_remove(uniprotB, "_HUMAN"))
+  
+  
+MCF_intra_comb_ratio <- MCF_only_combined %>%
+  filter(str_detect(link_type, "Intra")) %>%
+  mutate(Protein = uniprotA) %>%
+  select(-uniprotB, -uniprotA) %>%
+  rename(log2ratio_XL = log2ratio)
+  
+MCF_XL_and_DIA <- left_join(MCF_intra_comb_ratio, cell_lines_average_wide, by = 'Protein')  
+  
+
+MCF_corr_XL_and_DIA <- ggplot(MCF_XL_and_DIA, aes(x = log2ratio_XL, y = log2_FC_MCF7_HeLa)) +
+  geom_point() +
+  theme_classic() +
+  geom_smooth(method=lm, se = FALSE) +
+  xlim(-5,5) +
+  ylim(-5,5)
+
+## R2 calculation for corr between DIA quant and XL quant in HEK/HeLa
+fit_between_XL_DIA_MCF <- lm(log2ratio_XL ~ log2_FC_MCF7_HeLa, data = MCF_XL_and_DIA)
+summary(fit_between_XL_DIA_MCF)
+
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/MCF_XL_to_DIA_corr.svg", plot = MCF_corr_XL_and_DIA, width = 10, height = 8)
+```
+
+
+## DIA quants for keratin (fig. 2D)
+```{r}
+
+keratin <- cell_lines_DIA_median_norm %>%
+  filter(str_detect(Protein, "K1C18|K2C8")) %>%
+  filter(!str_detect(Protein, "K2C80"))
+
+keratin_DIA_boxplot <- ggplot(keratin, aes(x = cell_type, y = log2_quant, fill = cell_type)) +
+  geom_boxplot(alpha = 0.5) +
+  #scale_fill_fish_d(option = "Stethojulis_bandanensis", direction = -1, alpha = 0.6) +
+  scale_fill_viridis_d() +
+  theme_classic() +
+  geom_point(aes(color = Protein), size = 5,  position=position_jitter(w = 0.15)) +
+  scale_color_manual(values = c("K1C18" = "black", "K2C8" = "gray48")) 
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/Keratin_DIA_boxplot.svg", plot = keratin_DIA_boxplot, width = 10, height = 8)
+```
+
+
+## RNA binding proteins DIA (Figure 3A right and supp figure 4B,C)
+```{r}
+
+RNA_binding_proteins <-  cell_lines_DIA_median_norm %>%
+  filter(str_detect(Protein, paste(RNA_list, collapse="|"))) %>%
+  mutate(cell_type = as.factor(cell_type)) %>%
+  filter(!str_detect(Protein, "RALYL"))
+
+RNA_proteins_DIA_boxplot <- ggplot(RNA_binding_proteins, aes(x = Protein, y = log2_quant, fill = cell_type)) +
+  geom_boxplot(alpha = 0.6) +
+  facet_wrap(~ Protein, ncol = 6, nrow = 3, scales='free') +
+  theme_classic()
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/RNA_proteins_DIA_boxplot.svg", plot = RNA_proteins_DIA_boxplot, width = 10, height = 8)
+
+
+RNA_proteins_wide <- cell_lines_average_wide %>%
+  filter(str_detect(Protein, paste(RNA_list, collapse="|"))) %>%
+  #mutate(cell_type = as.factor(cell_type)) %>%
+  filter(!str_detect(Protein, "RALYL"))
+
+RNA_proteins_ave <- RNA_proteins_wide %>%
+  pivot_longer(col = c(log2_FC_HEK_HeLa, log2_FC_MCF7_HeLa), names_to = 'experiment', values_to = 'ave_log2ratio') %>%
+  mutate(Protein = as.factor(Protein)) %>%
+  arrange(Protein)
+
+RNA_proteins_DIA_heatmap <- ggplot(RNA_proteins_ave, aes(x = experiment, y = Protein, fill = ave_log2ratio)) + 
+  geom_tile() + 
+  theme(axis.title.y = element_blank(),
+        #axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  #scale_fill_distiller(palette = 'RdYlGn', direction = -1) 
+  scale_fill_gradient2(low = "slateblue4", mid = "white", high = "goldenrod1", limits = c(-2,2)) + 
+  theme_minimal()
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/RNA_proteins_DIA_heatmap.svg", plot = RNA_proteins_DIA_heatmap, width = 10, height = 8)
+
+DIA_log2_medians_RNA <- RNA_proteins_ave %>%
+  group_by(experiment) %>%
+  summarise(FC_median = median(ave_log2ratio))
+
+DIA_log2folds_ave_long <- cell_lines_average_wide %>%
+  pivot_longer(col = 5:6, names_to = "experiment", values_to = 'ave_log2ratio')
+
+DIA_log2_distributions_RNABPs <- ggplot(data = RNA_proteins_ave, aes(x = ave_log2ratio, fill = experiment, alpha = 0.6)) +
+  geom_density( color = "black") +
+  geom_density(data = DIA_log2folds_ave_long, aes(x = ave_log2ratio, fill = experiment, alpha = 0.4)) +
+  theme_classic() +
+  xlim(-3.5,3.5)
+
+cell_lines_DIA_distributions_log2_FC <- ggplot(cell_lines_DIA_log2_FC_long, aes(x = log2_FC)) + 
+  geom_density(aes(group = cell_line, fill = cell_line), alpha = 0.5) +
+  xlim(-6,6) +
+  theme_classic() 
+  #scale_fill_fish_d(option = "Stethojulis_bandanensis", direction = -1, alpha = 0.6) 
+  
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/DIA_log2_distributions_RNABPs.svg", plot = DIA_log2_distributions_RNABPs, width = 10, height = 8)
+
+```
+
+
+## DIA for ROA1 (HNRNPA1) and HNRPC (Fig. 3B)
+```{r}
+
+ROA1 <- cell_lines_DIA_median_norm %>%
+  filter(str_detect(Protein, "ROA1")) 
+
+ROA1_DIA_boxplot <- ggplot(ROA1, aes(x = cell_type, y = log2_quant, fill = cell_type)) +
+  geom_boxplot(alpha = 0.6) +
+  geom_point(size = 3,  position=position_jitter(w = 0.15), alpha = 0.8) +
+  #ylim(23.0, 24.4) +
+  #scale_fill_fish_d(option = "Stethojulis_bandanensis", direction = -1, alpha = 0.6) +
+  scale_fill_viridis_d() +
+  theme_classic()
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/ROA1_DIA_boxplot.svg", plot = ROA1_DIA_boxplot, width = 10, height = 8)
+
+
+HNRPC_DIA <-  cell_lines_DIA_median_norm %>%
+  filter(str_detect(Protein, "HNRPC")) 
+
+HNRPC_DIA_boxplot <- ggplot(HNRPC_DIA, aes(x = cell_type, y = log2_quant, fill = cell_type)) +
+  geom_boxplot(alpha = 0.6) +
+  geom_point(size = 3,  position=position_jitter(w = 0.15), alpha = 0.8) +
+  ylim(23.5, 25) +
+  #scale_fill_fish_d(option = "Stethojulis_bandanensis", direction = -1, alpha = 0.6) +
+  scale_fill_viridis_d() +
+  theme_classic()
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/HNRPC_DIA_boxplot.svg", plot = HNRPC_DIA_boxplot, width = 10, height = 8)
+
+```
+
+
+## SMCA5 protein levels (fig. 4B)
+```{r}
+
+SMCA5 <- cell_lines_DIA_median_norm %>%
+  filter(str_detect(Protein, "SMCA5"))
+
+SMCA5_DIA_boxplot <- ggplot(SMCA5, aes(x = cell_type, y = log2_median_norm, fill = cell_type)) +
+  geom_boxplot(alpha = 0.6) +
+  geom_point(size = 3,  position=position_jitter(w = 0.15), alpha = 0.8) +
+  ylim(24, 25) +  
+  scale_fill_viridis_d() +
+  #scale_fill_fish_d(option = "Stethojulis_bandanensis", direction = -1, alpha = 0.6) +
+  theme_classic()
+```
+
+## LGUL protein levels (fig. 5B)
+```{r}
+LGUL <- cell_lines_DIA_median_norm %>%
+  filter(str_detect(Protein, "LGUL"))
+
+LGUL_DIA_boxplot <- ggplot(LGUL, aes(x = cell_type, y = log2_median_norm, fill = cell_type)) +
+  geom_boxplot(alpha = 0.6) +
+  geom_point(size = 3,  position=position_jitter(w = 0.15), alpha = 0.8) +
+  #ylim(24, 25) +  
+  scale_fill_viridis_d() +
+  #scale_fill_fish_d(option = "Stethojulis_bandanensis", direction = -1, alpha = 0.6) +
+  theme_classic()
+```
+
+## ADT2 protein levels (fig. 6B left)
+```{r}
+
+ADT2 <- cell_lines_DIA_median_norm %>%
+  filter(str_detect(Protein, "ADT2"))
+
+ADT2_DIA_boxplot <- ggplot(ADT2, aes(x = cell_type, y = log2_quant, fill = cell_type)) +
+  geom_boxplot(alpha = 0.6) +
+  geom_point(size = 3,  position=position_jitter(w = 0.15), alpha = 0.8) +
+  #ylim(27.0, 28) +  
+  scale_fill_viridis_d() +
+  #scale_fill_fish_d(option = "Stethojulis_bandanensis", direction = -1, alpha = 0.6) +
+  theme_classic()
+
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/ADT2_DIA_boxplot.svg", plot = ADT2_DIA_boxplot, width = 10, height = 8)
+```
+
+## ADT3 protein levels (fig. 6B right)
+```{r}
+
+ADT3 <- cell_lines_DIA_median_norm %>%
+  filter(str_detect(Protein, "ADT3"))
+
+ADT3_DIA_boxplot <- ggplot(ADT3, aes(x = cell_type, y = log2_median_norm, fill = cell_type)) +
+  geom_boxplot(alpha = 0.6) +
+  geom_point(size = 3,  position=position_jitter(w = 0.15), alpha = 0.8) +
+  #ylim(27.0, 28) +
+  #scale_fill_fish_d(option = "Stethojulis_bandanensis", direction = -1, alpha = 0.6) +
+  scale_fill_viridis_d() +
+  theme_classic()
+
+
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/ADT3_DIA_boxplot.svg", plot = ADT3_DIA_boxplot, width = 10, height = 8)
+```
+
+
+## c2c12 mito treated with BKA and CATR (fig. 6D)
+```{r}
+
+## XLINKDB output "c2c12_mito_BKA_and_CTRA.xlsx"
+c2c12_mito_path = file.choose(new = FALSE)
+input_c2c12_BKA_CATR <- read_excel(c2c12_mito_path)
+
+# make a data frame with XLs, gene names, ratios, p-values. 95% intervals
+c2c12_BKA_CATR <- input_c2c12_BKA_CATR %>%
+  mutate(crosslink = str_c(pepA, "_", modposA, "_", pepB, "_", modposB)) %>%
+  select(crosslink, NetworkDistance, uniprotA, uniprotB, modposA, modposB, geneA, geneB, starts_with("log2ratio"), starts_with("num_reps"), starts_with("95pct")) %>%
+  mutate(XL_protein_name = str_c(uniprotA, "_", modposA, "_", uniprotB, "_", modposB)) %>%
+  mutate(XL_protein_name = str_remove_all(XL_protein_name, "_MOUSE")) %>%
+  mutate(XL_gene_name = str_c(geneA, "_", modposA, "_", geneB, "_", modposB)) %>%
+  mutate(link_type = case_when(str_detect(NetworkDistance, "Intra") == TRUE ~ "Intra", TRUE ~ "Inter"))
+
+C2c12_ADT <- c2c12_BKA_CATR %>%
+  filter(str_detect(XL_protein_name, "ADT"))
+
+C2c12_ADT_for_heatmap <- C2c12_ADT %>%
+  filter(str_detect(XL_protein_name,"ADT2_147_ADT2_272|ADT2_147_ADT2_33|ADT2_147_ADT2_63|ADT2_147_ADT2_147|ADT2_92_ADT2_23"))
+
+c2c12_ADT_heatmap_long <- C2c12_ADT_for_heatmap %>%
+  pivot_longer(col = c(log2ratio_1_BKA, log2ratio_2_CATR), names_to = 'experiment', values_to = 'log2ratio') %>%
+  mutate(log2ratio = case_when(log2ratio > 2.5 ~  2.5, log2ratio < -2.5 ~  -2.5, TRUE ~ log2ratio))
+
+  
+c2c12_BKA_CATR_heatmap <- ggplot(c2c12_ADT_heatmap_long, aes(x = experiment, y = XL_protein_name, fill = log2ratio)) + 
+  geom_tile() + 
+  theme(axis.title.y = element_blank(),
+        #axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  #scale_fill_distiller(palette = 'RdYlGn', direction = -1) 
+  scale_fill_gradient2(low = "green4", mid = "white", high = "firebrick2", limits = c(-2.5,2)) + 
+  theme_minimal()  
+  
+ggsave(file = "C:/Users/buffe/Documents/Cell_lines_paper/c2c12_BKA_CATR_heatmap.svg", plot = c2c12_BKA_CATR_heatmap, width = 10, height = 8)
+
+```
+
